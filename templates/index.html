@@ -1,0 +1,221 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Palette — image compression by clustering</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Fraunces:opsz,wght@9..144,300;9..144,500;9..144,600&family=IBM+Plex+Mono:wght@400;500&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="{{ url_for('static', filename='style.css') }}">
+</head>
+<body>
+
+<div class="grain"></div>
+
+<header class="topbar">
+  <div class="mark">
+    <span class="mark-dot"></span>
+    <span>Palette</span>
+  </div>
+  <div class="topbar-note">reduces every photo to k colors, then rebuilds it</div>
+</header>
+
+<main class="stage">
+
+  <section class="intro">
+    <h1>An image is just<br>pixels asking<br>for fewer colors.</h1>
+    <p class="lede">Drop a photo. K-Means finds the k most representative colors in it, then repaints every pixel using only that palette — no other compression trick involved.</p>
+  </section>
+
+  <section class="workbench">
+
+    <div class="panel drop-panel">
+      <form id="uploadForm" enctype="multipart/form-data">
+        <label for="fileInput" class="dropzone" id="dropzone">
+          <input type="file" id="fileInput" name="file" accept="image/*" required hidden>
+          <div class="dz-content" id="dzEmpty">
+            <svg width="40" height="40" viewBox="0 0 40 40" fill="none">
+              <path d="M20 5V25M20 5L12 13M20 5L28 13" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/>
+              <path d="M6 25V31C6 32.6569 7.34315 34 9 34H31C32.6569 34 34 32.6569 34 31V25" stroke="currentColor" stroke-width="2" stroke-linecap="round"/>
+            </svg>
+            <span class="dz-label">drop image / click to choose</span>
+            <span class="dz-sub">jpg · jpeg · png</span>
+          </div>
+          <img id="previewImg" class="dz-preview" alt="">
+        </label>
+
+        <div class="control-row">
+          <label class="k-label" for="kSlider">
+            clusters <span class="k-value" id="kValue">16</span>
+          </label>
+          <input type="range" id="kSlider" min="2" max="32" value="16" step="1">
+        </div>
+
+        <div class="swatch-row" id="swatchRow" aria-hidden="true"></div>
+
+        <button type="submit" class="run-btn" id="runBtn">
+          <span class="run-btn-text">compress</span>
+        </button>
+
+        <p class="flash-msg" id="flashMsg"></p>
+      </form>
+    </div>
+
+    <div class="panel result-panel" id="resultPanel">
+      <div class="result-empty" id="resultEmpty">
+        <span class="eq">=</span>
+        <p>output appears here</p>
+      </div>
+      <div class="result-loading" id="resultLoading">
+        <div class="loader-bars">
+          <span></span><span></span><span></span><span></span><span></span>
+        </div>
+        <p id="loadingText">assigning pixels to clusters…</p>
+      </div>
+      <div class="result-ready" id="resultReady">
+        <img id="resultImg" alt="Compressed output">
+        <a id="downloadLink" class="download-link" download="compressed.png">
+          <span>download</span>
+          <svg width="14" height="14" viewBox="0 0 14 14" fill="none"><path d="M7 1V9M7 9L4 6M7 9L10 6" stroke="currentColor" stroke-width="1.4" stroke-linecap="round" stroke-linejoin="round"/><path d="M1.5 10V11.5C1.5 12.0523 1.94772 12.5 2.5 12.5H11.5C12.0523 12.5 12.5 12.0523 12.5 11.5V10" stroke="currentColor" stroke-width="1.4" stroke-linecap="round"/></svg>
+        </a>
+      </div>
+    </div>
+
+  </section>
+
+  <section class="footnote">
+    <p>each run initializes centroids at random pixels, then iterates assignment and averaging until the palette settles.</p>
+  </section>
+
+</main>
+
+<script>
+const dropzone = document.getElementById('dropzone');
+const fileInput = document.getElementById('fileInput');
+const dzEmpty = document.getElementById('dzEmpty');
+const previewImg = document.getElementById('previewImg');
+const kSlider = document.getElementById('kSlider');
+const kValue = document.getElementById('kValue');
+const swatchRow = document.getElementById('swatchRow');
+const runBtn = document.getElementById('runBtn');
+const flashMsg = document.getElementById('flashMsg');
+
+const resultEmpty = document.getElementById('resultEmpty');
+const resultLoading = document.getElementById('resultLoading');
+const resultReady = document.getElementById('resultReady');
+const resultImg = document.getElementById('resultImg');
+const downloadLink = document.getElementById('downloadLink');
+const loadingText = document.getElementById('loadingText');
+
+const loadingMessages = [
+  'assigning pixels to clusters…',
+  'averaging cluster colors…',
+  'repainting from the palette…'
+];
+
+function renderSwatchGuide(k) {
+  swatchRow.innerHTML = '';
+  const hues = [355, 25, 45, 95, 150, 200, 230, 265];
+  for (let i = 0; i < k; i++) {
+    const s = document.createElement('span');
+    s.className = 'swatch';
+    const hue = hues[i % hues.length];
+    const light = 38 + (i * 7) % 30;
+    s.style.background = `hsl(${hue}, 45%, ${light}%)`;
+    swatchRow.appendChild(s);
+  }
+}
+renderSwatchGuide(16);
+
+kSlider.addEventListener('input', () => {
+  kValue.textContent = kSlider.value;
+  renderSwatchGuide(parseInt(kSlider.value, 10));
+});
+
+fileInput.addEventListener('change', () => {
+  const file = fileInput.files[0];
+  if (!file) return;
+  const url = URL.createObjectURL(file);
+  previewImg.src = url;
+  previewImg.style.display = 'block';
+  dzEmpty.style.display = 'none';
+  flashMsg.textContent = '';
+});
+
+['dragover', 'dragleave', 'drop'].forEach(evt => {
+  dropzone.addEventListener(evt, (e) => {
+    e.preventDefault();
+    if (evt === 'dragover') dropzone.classList.add('is-dragging');
+    if (evt === 'dragleave' || evt === 'drop') dropzone.classList.remove('is-dragging');
+  });
+});
+dropzone.addEventListener('drop', (e) => {
+  const file = e.dataTransfer.files[0];
+  if (file) {
+    fileInput.files = e.dataTransfer.files;
+    fileInput.dispatchEvent(new Event('change'));
+  }
+});
+
+let loadingInterval;
+
+document.getElementById('uploadForm').addEventListener('submit', async function (e) {
+  e.preventDefault();
+  if (!fileInput.files[0]) {
+    flashMsg.textContent = 'choose an image first';
+    return;
+  }
+
+  const formData = new FormData();
+  formData.append('file', fileInput.files[0]);
+  formData.append('k', kSlider.value);
+
+  flashMsg.textContent = '';
+  runBtn.disabled = true;
+  runBtn.classList.add('is-running');
+
+  resultEmpty.style.display = 'none';
+  resultReady.style.display = 'none';
+  resultLoading.style.display = 'flex';
+
+  let msgIndex = 0;
+  loadingText.textContent = loadingMessages[0];
+  loadingInterval = setInterval(() => {
+    msgIndex = (msgIndex + 1) % loadingMessages.length;
+    loadingText.textContent = loadingMessages[msgIndex];
+  }, 1400);
+
+  try {
+    const response = await fetch("{{ url_for('upload_file') }}", {
+      method: "POST",
+      body: formData
+    });
+
+    clearInterval(loadingInterval);
+
+    if (response.ok) {
+      const blob = await response.blob();
+      const url = URL.createObjectURL(blob);
+      resultImg.src = url;
+      downloadLink.href = url;
+      resultLoading.style.display = 'none';
+      resultReady.style.display = 'flex';
+    } else {
+      resultLoading.style.display = 'none';
+      resultEmpty.style.display = 'flex';
+      flashMsg.textContent = 'something went wrong — try a different file';
+    }
+  } catch (err) {
+    clearInterval(loadingInterval);
+    resultLoading.style.display = 'none';
+    resultEmpty.style.display = 'flex';
+    flashMsg.textContent = 'upload failed — check your connection';
+  } finally {
+    runBtn.disabled = false;
+    runBtn.classList.remove('is-running');
+  }
+});
+</script>
+
+</body>
+</html>
